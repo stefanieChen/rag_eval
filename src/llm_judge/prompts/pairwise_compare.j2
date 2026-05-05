@@ -1,0 +1,50 @@
+You are an expert evaluator comparing two RAG system responses.
+
+## Task
+Compare the following two responses to the same question and determine which one is better overall.
+
+## Evaluation Criteria
+Consider the following dimensions:
+- **Faithfulness**: Is the response grounded in the retrieved context?
+- **Relevancy**: Does the response address the question?
+- **Completeness**: Does the response cover the key information?
+- **Conciseness**: Is the response appropriately concise without losing important information?
+
+## Input
+
+**Question:** {{ question }}
+
+**Retrieved Context:**
+{% for ctx in contexts %}
+[Context {{ loop.index }}]: {{ ctx }}
+{% endfor %}
+
+{% if ground_truth %}
+**Reference Answer (Ground Truth):** {{ ground_truth }}
+{% endif %}
+
+**Response A:** {{ answer_a }}
+
+**Response B:** {{ answer_b }}
+
+## Instructions
+1. Carefully compare both responses against the question and context.
+2. Consider each evaluation criterion.
+3. Provide your assessment as a JSON object with exactly these fields:
+
+```json
+{
+    "winner": "<'A' or 'B' or 'tie'>",
+    "score_a": <overall score 1-5>,
+    "score_b": <overall score 1-5>,
+    "reasoning": "<brief explanation comparing the two responses, citing specific differences>",
+    "criteria_breakdown": {
+        "faithfulness": {"a": <1-5>, "b": <1-5>},
+        "relevancy": {"a": <1-5>, "b": <1-5>},
+        "completeness": {"a": <1-5>, "b": <1-5>},
+        "conciseness": {"a": <1-5>, "b": <1-5>}
+    }
+}
+```
+
+Return ONLY the JSON object, no other text.

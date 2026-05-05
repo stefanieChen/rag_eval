@@ -1,0 +1,22 @@
+# Relevancy Rubric
+# Evaluates whether the answer addresses the user's question
+
+name: "relevancy"
+description: "Assess whether the answer directly and completely addresses the user's question."
+
+criteria:
+  - score: 5
+    label: "Highly Relevant"
+    description: "The answer directly and precisely addresses the question with no off-topic content."
+  - score: 4
+    label: "Mostly Relevant"
+    description: "The answer addresses the question well, with only minor tangential information."
+  - score: 3
+    label: "Partially Relevant"
+    description: "The answer addresses some aspects of the question but misses key parts or includes noticeable irrelevant content."
+  - score: 2
+    label: "Mostly Irrelevant"
+    description: "The answer only tangentially relates to the question. Most content is off-topic."
+  - score: 1
+    label: "Irrelevant"
+    description: "The answer does not address the question at all."

@@ -1,0 +1,16 @@
+# Hallucination Rubric
+# Evaluates individual claims for grounding in the provided context
+
+name: "hallucination"
+description: "Assess whether a specific claim from the answer is grounded in the retrieved context."
+
+criteria:
+  - score: 1.0
+    label: "Fully Grounded"
+    description: "The claim is explicitly stated in or directly inferable from the context."
+  - score: 0.5
+    label: "Partially Grounded"
+    description: "The claim is loosely related to the context but includes details not present in it."
+  - score: 0.0
+    label: "Not Grounded"
+    description: "The claim has no support in the context and appears to be fabricated."

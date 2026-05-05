@@ -1,0 +1,22 @@
+# Faithfulness Rubric
+# Evaluates whether the answer is grounded in the retrieved context
+
+name: "faithfulness"
+description: "Assess whether every claim in the answer is supported by the retrieved context."
+
+criteria:
+  - score: 5
+    label: "Fully Faithful"
+    description: "Every claim in the answer is directly supported by the context. No information is added beyond what the context provides."
+  - score: 4
+    label: "Mostly Faithful"
+    description: "Nearly all claims are supported. Minor inferences are reasonable and clearly derived from the context."
+  - score: 3
+    label: "Partially Faithful"
+    description: "Some claims are supported, but the answer includes noticeable extrapolation or unsupported details."
+  - score: 2
+    label: "Mostly Unfaithful"
+    description: "Many claims lack support from the context. The answer introduces significant unsupported information."
+  - score: 1
+    label: "Unfaithful"
+    description: "The answer is largely fabricated or contradicts the retrieved context."

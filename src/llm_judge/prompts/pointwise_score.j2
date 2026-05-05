@@ -1,0 +1,41 @@
+You are an expert evaluator assessing the quality of a RAG (Retrieval-Augmented Generation) system response.
+
+## Task
+Evaluate the following response on the criterion: **{{ criterion_name }}**
+
+## Rubric
+{{ rubric_description }}
+
+Scoring scale:
+{% for level in rubric_levels %}
+- **{{ level.score }}** ({{ level.label }}): {{ level.description }}
+{% endfor %}
+
+## Input
+
+**Question:** {{ question }}
+
+**Retrieved Context:**
+{% for ctx in contexts %}
+[Context {{ loop.index }}]: {{ ctx }}
+{% endfor %}
+
+**Response:** {{ answer }}
+
+{% if ground_truth %}
+**Reference Answer (Ground Truth):** {{ ground_truth }}
+{% endif %}
+
+## Instructions
+1. Carefully read the question, context, and response.
+2. Evaluate the response against the rubric criterion.
+3. Provide your assessment as a JSON object with exactly these fields:
+
+```json
+{
+    "score": <numeric score from the rubric>,
+    "reasoning": "<brief explanation of why you assigned this score, citing specific evidence>"
+}
+```
+
+Return ONLY the JSON object, no other text.

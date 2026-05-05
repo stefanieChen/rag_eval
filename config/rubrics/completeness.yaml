@@ -1,0 +1,22 @@
+# Completeness Rubric
+# Evaluates whether the answer covers all aspects of the expected answer
+
+name: "completeness"
+description: "Assess whether the answer covers all key information points present in the ground truth."
+
+criteria:
+  - score: 5
+    label: "Fully Complete"
+    description: "The answer covers all key points from the ground truth. No important information is missing."
+  - score: 4
+    label: "Mostly Complete"
+    description: "The answer covers most key points. Only minor details are omitted."
+  - score: 3
+    label: "Partially Complete"
+    description: "The answer covers some key points but misses several important aspects."
+  - score: 2
+    label: "Mostly Incomplete"
+    description: "The answer addresses only a small portion of the expected information."
+  - score: 1
+    label: "Incomplete"
+    description: "The answer fails to cover any significant portion of the ground truth."
