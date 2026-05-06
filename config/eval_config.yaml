@@ -26,8 +26,27 @@ logging:
       file: experiment.log
 
 rag:
+  # Client type: "rag2" (direct import), "http" (REST API), or fully-qualified class path
+  client_type: "rag2"
+
+  # --- rag2 client settings (used when client_type = "rag2") ---
   project_path: "../rag_2"
   config_path: "../rag_2/config/settings.yaml"
+
+  # --- HTTP client settings (used when client_type = "http") ---
+  # http:
+  #   base_url: "http://localhost:8000"
+  #   query_endpoint: "/query"
+  #   method: "POST"
+  #   timeout: 30
+  #   headers:
+  #     Content-Type: "application/json"
+  #   request_body_template:
+  #     question: "{question}"
+  #   response_mapping:
+  #     answer: "answer"                # dot-path into JSON response
+  #     contexts: "sources[].content"   # supports []-expansion
+  #     context_ids: "sources[].id"
 
 evaluation:
   default_metrics:

@@ -1,12 +1,13 @@
 # RAG Evaluation Suite
 
-A standalone, multi-layer evaluation system for RAG (Retrieval-Augmented Generation) pipelines. Features LLM-as-a-Judge, classical IR metrics, semantic similarity, hallucination detection, and A/B experiment comparison.
+A standalone, multi-layer evaluation system for **any** RAG (Retrieval-Augmented Generation) pipeline. Features pluggable RAG client interface, LLM-as-a-Judge, classical IR metrics, semantic similarity, hallucination detection, and A/B experiment comparison.
 
 ## Features
 
 - **Multi-layer evaluation**: Retrieval metrics, generation quality, semantic similarity, hallucination detection
 - **LLM-as-a-Judge**: Pointwise scoring, pairwise comparison, reference-based grading with configurable rubrics
 - **Pluggable LLM providers**: Ollama (local, default), OpenAI, Anthropic — switch via config
+- **Pluggable RAG clients**: Evaluate any RAG system — direct import, HTTP API, or custom adapter
 - **A/B experiments**: Compare RAG configurations with statistical significance tests
 - **Rich reporting**: JSON traces, HTML summaries, Streamlit dashboard
 
@@ -31,7 +32,10 @@ graph TB
 
     subgraph Pipeline["Pipeline  (src/pipeline/)"]
         evaluator["Evaluator<br/><i>Orchestrates full eval runs</i>"]
-        rag_client["RAGClient<br/><i>Wraps rag_2 pipeline</i>"]
+        client_base["RAGClientBase<br/><i>Abstract interface</i>"]
+        rag2_client["Rag2Client<br/><i>Direct rag_2 import</i>"]
+        http_client["HttpRAGClient<br/><i>REST API adapter</i>"]
+        factory["ClientFactory<br/><i>Config-driven creation</i>"]
         experiment["ExperimentRunner<br/><i>A/B testing + statistics</i>"]
     end
 
@@ -62,7 +66,8 @@ graph TB
     end
 
     subgraph External["External Systems"]
-        rag2["rag_2 Pipeline<br/><i>Retrieval + Generation</i>"]
+        rag2["rag_2 Pipeline<br/><i>Direct Python import</i>"]
+        any_rag["Any RAG System<br/><i>Via HTTP REST API</i>"]
         llm_providers["LLM Providers<br/><i>Ollama · OpenAI · Anthropic</i>"]
     end
 
@@ -76,17 +81,23 @@ graph TB
 
     %% Pipeline flows
     evaluator --> loader
-    evaluator --> rag_client
+    evaluator --> factory
     evaluator --> retrieval & generation & hallucination & semantic
     evaluator --> composite
     evaluator --> reporter
 
     experiment --> loader
-    experiment --> rag_client
+    experiment --> factory
     experiment --> pairwise
 
-    %% RAG Client → External
-    rag_client --> rag2
+    %% Factory → Clients
+    factory --> client_base
+    rag2_client --> client_base
+    http_client --> client_base
+
+    %% Clients → External
+    rag2_client --> rag2
+    http_client --> any_rag
 
     %% Metrics → Judge
     generation --> judge_base
@@ -116,8 +127,8 @@ graph TB
     classDef report fill:#fdf2f8,stroke:#db2777,stroke-width:2px
     classDef config fill:#f5f5f4,stroke:#78716c,stroke-width:1px,stroke-dasharray: 5 5
 
-    class rag2,llm_providers external
-    class evaluator,rag_client,experiment pipeline
+    class rag2,any_rag,llm_providers external
+    class evaluator,client_base,rag2_client,http_client,factory,experiment pipeline
     class retrieval,generation,hallucination,semantic,composite metrics
     class judge_base,pointwise,pairwise,refbased judge
     class reporter,comparator,dashboard report
@@ -201,6 +212,66 @@ python cli.py dashboard
 - Multi-config comparison on identical test sets
 - Pairwise LLM judge + statistical significance (Wilcoxon / bootstrap)
 
+## Connecting to Your RAG System
+
+The evaluation suite uses a **pluggable client interface** (`RAGClientBase`). Three ways to connect:
+
+### Option 1: HTTP API (recommended for most systems)
+
+If your RAG system has a REST API:
+
+```yaml
+# config/eval_config.yaml
+rag:
+  client_type: "http"
+  http:
+    base_url: "http://localhost:8000"
+    query_endpoint: "/query"
+    method: "POST"
+    request_body_template:
+      question: "{question}"
+    response_mapping:
+      answer: "answer"                # dot-path into JSON response
+      contexts: "sources[].content"   # supports []-expansion
+      context_ids: "sources[].id"
+```
+
+Or via CLI: `python cli.py eval --test-set data/test_sets/sample.json --mode pipeline --client-type http`
+
+### Option 2: Direct import (rag_2)
+
+```yaml
+rag:
+  client_type: "rag2"
+  project_path: "../rag_2"
+  config_path: "../rag_2/config/settings.yaml"
+```
+
+### Option 3: Custom client (Python)
+
+Implement `RAGClientBase` for any system:
+
+```python
+from src.pipeline.client_base import RAGClientBase
+from src.datasets.schema import RAGResponse
+
+class MyRAGClient(RAGClientBase):
+    def query(self, question: str) -> RAGResponse:
+        result = my_rag_system.ask(question)
+        return RAGResponse(
+            answer=result["answer"],
+            retrieved_contexts=result["contexts"],
+        )
+```
+
+Use it via config (`client_type: "my_package.MyRAGClient"`) or inject directly:
+
+```python
+from src.pipeline.evaluator import Evaluator
+evaluator = Evaluator(rag_client=MyRAGClient())
+summary = evaluator.run("test_set.json", mode="pipeline")
+```
+
 ## Configuration
 
 Edit `config/eval_config.yaml`:
@@ -212,6 +283,7 @@ judge:
   temperature: 0.0
 
 rag:
+  client_type: "rag2"       # "rag2" | "http" | fully-qualified class path
   project_path: "../rag_2"
   config_path: "../rag_2/config/settings.yaml"
 ```
@@ -228,7 +300,13 @@ rag_eval/
 ├── src/
 │   ├── llm_judge/             # LLM-as-a-Judge core
 │   ├── metrics/               # All metric implementations
-│   ├── pipeline/              # Evaluation orchestration & RAG client
+│   ├── pipeline/              # Evaluation orchestration
+│   │   ├── client_base.py     # RAGClientBase abstract interface
+│   │   ├── rag_client.py      # Rag2Client (direct rag_2 import)
+│   │   ├── http_client.py     # HttpRAGClient (REST API adapter)
+│   │   ├── client_factory.py  # Config-driven client creation
+│   │   ├── evaluator.py       # Evaluation orchestrator
+│   │   └── experiment.py      # A/B experiment runner
 │   ├── datasets/              # Test set management & generation
 │   └── reporting/             # Results, reports, dashboard
 ├── data/

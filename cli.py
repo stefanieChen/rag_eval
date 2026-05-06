@@ -33,7 +33,11 @@ def cli():
 @click.option("--output-dir", default=None, help="Directory to save results")
 @click.option("--format", "output_format", type=click.Choice(["json", "html", "both"]),
               default="json", help="Output format")
-def eval(test_set: str, mode: str, metrics: str, output_dir: str, output_format: str):
+@click.option("--client-type", default=None,
+              help="RAG client type: 'rag2', 'http', or a fully-qualified class path. "
+                   "Overrides config. Only used in pipeline mode.")
+def eval(test_set: str, mode: str, metrics: str, output_dir: str, output_format: str,
+         client_type: str):
     """Run evaluation on a test set."""
     from src.pipeline.evaluator import Evaluator
     from src.reporting.reporter import save_html_report, save_json_report
@@ -46,12 +50,21 @@ def eval(test_set: str, mode: str, metrics: str, output_dir: str, output_format:
         "test_set": test_set,
         "mode": mode,
         "metrics": metrics_list or "default",
+        "client_type": client_type or "config-default",
     })
     console.print(f"  Test set: {test_set}")
     console.print(f"  Mode: {mode}")
     console.print(f"  Metrics: {metrics_list or 'all defaults'}")
+    if client_type:
+        console.print(f"  Client: {client_type}")
 
-    evaluator = Evaluator()
+    # Create RAG client via factory if pipeline mode and client_type specified
+    rag_client = None
+    if mode == "pipeline" and client_type:
+        from src.pipeline.client_factory import create_rag_client
+        rag_client = create_rag_client(client_type=client_type)
+
+    evaluator = Evaluator(rag_client=rag_client)
     summary = evaluator.run(
         test_set_path=test_set,
         mode=mode,
@@ -80,6 +93,8 @@ def eval(test_set: str, mode: str, metrics: str, output_dir: str, output_format:
 @click.option("--label-a", default="Config A", help="Label for variant A")
 @click.option("--label-b", default="Config B", help="Label for variant B")
 @click.option("--output-dir", default=None, help="Directory to save results")
+@click.option("--client-type", default=None,
+              help="RAG client type: 'rag2', 'http', or a fully-qualified class path.")
 def experiment(
     test_set: str,
     config_a: str,
@@ -87,6 +102,7 @@ def experiment(
     label_a: str,
     label_b: str,
     output_dir: str,
+    client_type: str,
 ):
     """Run A/B experiment comparing two RAG configurations."""
     from src.pipeline.experiment import ExperimentRunner
@@ -102,6 +118,8 @@ def experiment(
     console.print(f"[bold blue]Running A/B experiment[/bold blue]")
     console.print(f"  {label_a}: {config_a_dict}")
     console.print(f"  {label_b}: {config_b_dict}")
+    if client_type:
+        console.print(f"  Client: {client_type}")
 
     logger.info("Starting A/B experiment", extra={
         "test_set": test_set,
@@ -109,9 +127,16 @@ def experiment(
         "config_b": config_b_dict,
         "label_a": label_a,
         "label_b": label_b,
+        "client_type": client_type or "config-default",
     })
 
-    runner = ExperimentRunner()
+    # Create RAG client via factory if client_type specified
+    rag_client = None
+    if client_type:
+        from src.pipeline.client_factory import create_rag_client
+        rag_client = create_rag_client(client_type=client_type)
+
+    runner = ExperimentRunner(rag_client=rag_client)
     result = runner.run(
         test_set_path=test_set,
         config_a=config_a_dict,

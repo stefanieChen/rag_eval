@@ -13,6 +13,7 @@ from src.datasets.schema import EvalResult, EvalRunSummary, EvalTestCase, RAGRes
 from src.llm_judge.judge_base import load_eval_config
 from src.logging import get_logger
 from src.metrics.composite import compute_composite_score
+from src.pipeline.client_base import RAGClientBase
 
 
 class Evaluator:
@@ -23,11 +24,16 @@ class Evaluator:
     - **pipeline**: Queries the live RAG system and evaluates real responses.
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        rag_client: Optional[RAGClientBase] = None,
+    ) -> None:
         if config is None:
             config = load_eval_config()
         self._config = config
         self._eval_cfg = config.get("evaluation", {})
+        self._rag_client = rag_client
         self._logger = get_logger("pipeline.evaluator")
 
     def run(
@@ -126,10 +132,13 @@ class Evaluator:
         rag_client = None
 
         if mode == "pipeline":
-            from src.pipeline.rag_client import RAGClient
+            if self._rag_client is not None:
+                rag_client = self._rag_client
+            else:
+                from src.pipeline.client_factory import create_rag_client
 
-            self._logger.info("Initializing RAG client for pipeline mode")
-            rag_client = RAGClient(config=self._config)
+                self._logger.info("Creating RAG client for pipeline mode via factory")
+                rag_client = create_rag_client(config=self._config)
 
         for tc in test_cases:
             if mode == "pipeline" and rag_client is not None:

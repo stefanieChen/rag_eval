@@ -1,7 +1,7 @@
-"""RAG client: interface to the rag_2 RAG pipeline.
+"""RAG client for the rag_2 RAG pipeline.
 
-Provides a clean API for querying the RAG system, abstracting away
-the import path and configuration details.
+Provides a concrete RAGClientBase implementation that imports and
+drives the rag_2 project's RAGPipeline directly via the filesystem.
 """
 
 import importlib
@@ -14,10 +14,11 @@ from typing import Any, Dict, List, Optional
 from src.datasets.schema import RAGResponse
 from src.llm_judge.judge_base import load_eval_config
 from src.logging import get_logger
+from src.pipeline.client_base import RAGClientBase
 
 
-class RAGClient:
-    """Client interface to the rag_2 RAG pipeline.
+class Rag2Client(RAGClientBase):
+    """Concrete client for the rag_2 RAG pipeline.
 
     Supports direct Python import (same machine) by adding the
     rag_2 project to sys.path and instantiating RAGPipeline.
@@ -207,7 +208,7 @@ class RAGClient:
         finally:
             self._pipeline = old_pipeline
 
-    def get_rag_config(self) -> Dict[str, Any]:
+    def get_config(self) -> Dict[str, Any]:
         """Return the current RAG system configuration.
 
         Returns:
@@ -215,6 +216,14 @@ class RAGClient:
         """
         self._ensure_pipeline()
         return self._rag_config or {}
+
+    # Keep old name for backward compatibility
+    get_rag_config = get_config
+
+    @property
+    def supports_config_override(self) -> bool:
+        """Rag2Client supports runtime config overrides for A/B testing."""
+        return True
 
 
 def _deep_merge(base: Dict, override: Dict) -> Dict:
@@ -257,3 +266,7 @@ def _unflatten_dict(flat: Dict[str, Any]) -> Dict[str, Any]:
             current = current[part]
         current[parts[-1]] = value
     return result
+
+
+# Backward-compatible alias
+RAGClient = Rag2Client
