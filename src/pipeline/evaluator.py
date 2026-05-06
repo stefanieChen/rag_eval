@@ -11,6 +11,7 @@ from uuid import uuid4
 from src.datasets.loader import load_test_set
 from src.datasets.schema import EvalResult, EvalRunSummary, EvalTestCase, RAGResponse, TestCase
 from src.llm_judge.judge_base import load_eval_config
+from src.logging import get_logger
 from src.metrics.composite import compute_composite_score
 
 
@@ -27,6 +28,7 @@ class Evaluator:
             config = load_eval_config()
         self._config = config
         self._eval_cfg = config.get("evaluation", {})
+        self._logger = get_logger("pipeline.evaluator")
 
     def run(
         self,
@@ -47,6 +49,11 @@ class Evaluator:
         run_id = uuid4().hex[:12]
         start_time = time.perf_counter()
 
+        self._logger.info(
+            "Evaluation started",
+            extra={"test_set": test_set_path, "mode": mode, "metrics": metrics or "default"},
+        )
+
         test_cases = load_test_set(test_set_path)
         if metrics is None:
             metrics = self._eval_cfg.get("default_metrics", [
@@ -54,12 +61,21 @@ class Evaluator:
                 "completeness", "hallucination", "semantic_similarity",
             ])
 
+        self._logger.debug(
+            "Loaded test cases",
+            extra={"count": len(test_cases), "run_id": run_id},
+        )
+
         # Build eval test cases with RAG responses
         eval_cases = self._build_eval_cases(test_cases, mode)
 
         # Evaluate each case
         per_case_results = []
-        for eval_case in eval_cases:
+        for idx, eval_case in enumerate(eval_cases, start=1):
+            self._logger.debug(
+                "Evaluating case",
+                extra={"index": idx, "question": eval_case.question[:80], "mode": mode},
+            )
             result = self._evaluate_case(eval_case, metrics)
             per_case_results.append(result)
 
@@ -67,6 +83,16 @@ class Evaluator:
         aggregated = self._aggregate_results(per_case_results, metrics)
 
         total_ms = (time.perf_counter() - start_time) * 1000
+
+        self._logger.info(
+            "Evaluation completed",
+            extra={
+                "run_id": run_id,
+                "num_cases": len(test_cases),
+                "total_latency_ms": total_ms,
+                "avg_latency_ms": total_ms / max(len(test_cases), 1),
+            },
+        )
 
         return EvalRunSummary(
             run_id=run_id,
@@ -101,11 +127,20 @@ class Evaluator:
 
         if mode == "pipeline":
             from src.pipeline.rag_client import RAGClient
+
+            self._logger.info("Initializing RAG client for pipeline mode")
             rag_client = RAGClient(config=self._config)
 
         for tc in test_cases:
             if mode == "pipeline" and rag_client is not None:
-                rag_response = rag_client.query(tc.question)
+                try:
+                    rag_response = rag_client.query(tc.question)
+                except Exception as exc:
+                    self._logger.exception(
+                        "RAG query failed",
+                        extra={"question": tc.question, "error": str(exc)},
+                    )
+                    raise
             else:
                 # Static mode: use test set contexts as "retrieved" and leave answer empty
                 rag_response = RAGResponse(

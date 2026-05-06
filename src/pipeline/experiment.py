@@ -18,6 +18,7 @@ from src.datasets.schema import TestCase
 from src.llm_judge.judge_base import load_eval_config
 from src.llm_judge.pairwise import PairwiseJudge, PairwiseResult
 from src.pipeline.rag_client import RAGClient
+from src.logging import get_logger
 
 
 class ExperimentResult(BaseModel):
@@ -51,6 +52,7 @@ class ExperimentRunner:
             config = load_eval_config()
         self._config = config
         self._exp_cfg = config.get("experiment", {})
+        self._logger = get_logger("pipeline.experiment_runner")
 
     def run(
         self,
@@ -83,10 +85,27 @@ class ExperimentRunner:
         scores_a_all: List[float] = []
         scores_b_all: List[float] = []
 
+        self._logger.info(
+            "Experiment started",
+            extra={
+                "experiment_id": experiment_id,
+                "test_set": test_set_path,
+                "num_cases": len(test_cases),
+                "config_a": config_a,
+                "config_b": config_b,
+            },
+        )
+
         for tc in test_cases:
             # Query both configs
-            response_a = rag_client.query_with_config(tc.question, config_a)
-            response_b = rag_client.query_with_config(tc.question, config_b)
+            try:
+                response_a = rag_client.query_with_config(tc.question, config_a)
+                response_b = rag_client.query_with_config(tc.question, config_b)
+            except Exception as exc:
+                self._logger.exception(
+                    "Query failed", extra={"question": tc.question, "error": str(exc)}
+                )
+                raise
 
             # Pairwise comparison
             pairwise = pairwise_judge.evaluate(
@@ -135,6 +154,17 @@ class ExperimentRunner:
             winner = "tie"
 
         total_ms = (time.perf_counter() - start_time) * 1000
+
+        self._logger.info(
+            "Experiment completed",
+            extra={
+                "experiment_id": experiment_id,
+                "winner": winner,
+                "avg_latency_ms": total_ms / max(len(test_cases), 1),
+                "total_latency_ms": total_ms,
+                "p_value": p_value,
+            },
+        )
 
         return ExperimentResult(
             experiment_id=experiment_id,
@@ -193,21 +223,25 @@ class ExperimentRunner:
                 if all(d == 0 for d in diffs):
                     return {"test": "wilcoxon", "p_value": 1.0, "statistic": 0.0, "significant": False}
                 stat, p_value = stats.wilcoxon(scores_a, scores_b)
+                stat = float(stat)
+                p_value = float(p_value)
                 return {
                     "test": "wilcoxon",
-                    "statistic": round(float(stat), 4),
-                    "p_value": round(float(p_value), 6),
-                    "significant": p_value < sig_level,
+                    "statistic": round(stat, 4),
+                    "p_value": round(p_value, 6),
+                    "significant": bool(p_value < sig_level),
                 }
 
             elif test_type == "paired_t":
                 # Paired t-test (parametric)
                 stat, p_value = stats.ttest_rel(scores_a, scores_b)
+                stat = float(stat)
+                p_value = float(p_value)
                 return {
                     "test": "paired_t",
-                    "statistic": round(float(stat), 4),
-                    "p_value": round(float(p_value), 6),
-                    "significant": p_value < sig_level,
+                    "statistic": round(stat, 4),
+                    "p_value": round(p_value, 6),
+                    "significant": bool(p_value < sig_level),
                 }
 
             elif test_type == "bootstrap":

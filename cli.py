@@ -12,7 +12,10 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from src.logging import get_logger, setup_logging
+
 console = Console()
+logger = get_logger("cli")
 
 
 @click.group()
@@ -38,6 +41,12 @@ def eval(test_set: str, mode: str, metrics: str, output_dir: str, output_format:
     metrics_list = metrics.split(",") if metrics else None
 
     console.print(f"[bold blue]Running evaluation[/bold blue]")
+
+    logger.info("Starting evaluation", extra={
+        "test_set": test_set,
+        "mode": mode,
+        "metrics": metrics_list or "default",
+    })
     console.print(f"  Test set: {test_set}")
     console.print(f"  Mode: {mode}")
     console.print(f"  Metrics: {metrics_list or 'all defaults'}")
@@ -53,10 +62,12 @@ def eval(test_set: str, mode: str, metrics: str, output_dir: str, output_format:
     if output_format in ("json", "both"):
         path = save_json_report(summary, output_dir=output_dir)
         console.print(f"  [green]JSON saved:[/green] {path}")
+        logger.info("Evaluation JSON report saved", extra={"path": str(path)})
 
     if output_format in ("html", "both"):
         path = save_html_report(summary, output_dir=output_dir)
         console.print(f"  [green]HTML saved:[/green] {path}")
+        logger.info("Evaluation HTML report saved", extra={"path": str(path)})
 
     # Print summary table
     _print_summary(summary.aggregated_scores, summary.num_cases, summary.total_latency_ms)
@@ -69,28 +80,42 @@ def eval(test_set: str, mode: str, metrics: str, output_dir: str, output_format:
 @click.option("--label-a", default="Config A", help="Label for variant A")
 @click.option("--label-b", default="Config B", help="Label for variant B")
 @click.option("--output-dir", default=None, help="Directory to save results")
-def experiment(test_set: str, config_a: str, config_b: str,
-               label_a: str, label_b: str, output_dir: str):
+def experiment(
+    test_set: str,
+    config_a: str,
+    config_b: str,
+    label_a: str,
+    label_b: str,
+    output_dir: str,
+):
     """Run A/B experiment comparing two RAG configurations."""
     from src.pipeline.experiment import ExperimentRunner
     from src.reporting.reporter import save_experiment_report
 
     try:
-        cfg_a = json.loads(config_a)
-        cfg_b = json.loads(config_b)
+        config_a_dict = json.loads(config_a)
+        config_b_dict = json.loads(config_b)
     except json.JSONDecodeError as e:
         console.print(f"[red]Invalid JSON config:[/red] {e}")
         sys.exit(1)
 
     console.print(f"[bold blue]Running A/B experiment[/bold blue]")
-    console.print(f"  {label_a}: {cfg_a}")
-    console.print(f"  {label_b}: {cfg_b}")
+    console.print(f"  {label_a}: {config_a_dict}")
+    console.print(f"  {label_b}: {config_b_dict}")
+
+    logger.info("Starting A/B experiment", extra={
+        "test_set": test_set,
+        "config_a": config_a_dict,
+        "config_b": config_b_dict,
+        "label_a": label_a,
+        "label_b": label_b,
+    })
 
     runner = ExperimentRunner()
     result = runner.run(
         test_set_path=test_set,
-        config_a=cfg_a,
-        config_b=cfg_b,
+        config_a=config_a_dict,
+        config_b=config_b_dict,
         label_a=label_a,
         label_b=label_b,
     )
@@ -98,6 +123,7 @@ def experiment(test_set: str, config_a: str, config_b: str,
     # Save result
     path = save_experiment_report(result.model_dump(mode="json"), output_dir=output_dir)
     console.print(f"  [green]Result saved:[/green] {path}")
+    logger.info("Experiment result saved", extra={"path": str(path)})
 
     # Print summary
     _print_experiment_summary(result)
