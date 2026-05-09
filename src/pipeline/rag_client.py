@@ -71,6 +71,17 @@ class Rag2Client(RAGClientBase):
                 if rag2_str not in src_pkg.__path__:
                     src_pkg.__path__.append(rag2_str)
 
+                # Also extend __path__ for already-loaded sub-packages
+                # (e.g. src.logging) so rag_2's sub-modules are discoverable
+                for sub_dir in rag2_src_path.iterdir():
+                    if sub_dir.is_dir() and (sub_dir / "__init__.py").exists():
+                        sub_pkg_name = f"src.{sub_dir.name}"
+                        if sub_pkg_name in sys.modules:
+                            sub_pkg = sys.modules[sub_pkg_name]
+                            sub_str = str(sub_dir)
+                            if hasattr(sub_pkg, "__path__") and sub_str not in sub_pkg.__path__:
+                                sub_pkg.__path__.append(sub_str)
+
         config_module = self._load_rag2_module("rag2_config", rag2_src_path / "config.py")
         rag_load_config = getattr(config_module, "load_config")
 

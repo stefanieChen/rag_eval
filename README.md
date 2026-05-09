@@ -10,6 +10,9 @@ A standalone, multi-layer evaluation system for **any** RAG (Retrieval-Augmented
 - **Pluggable RAG clients**: Evaluate any RAG system — direct import, HTTP API, or custom adapter
 - **A/B experiments**: Compare RAG configurations with statistical significance tests
 - **Rich reporting**: JSON traces, HTML summaries, Streamlit dashboard
+- **CI/CD ready**: Quality gates, regression detection, exit codes for pipeline integration
+- **Python SDK**: Programmatic API for embedding eval into your own scripts
+- **Windsurf IDE integration**: Slash-command workflows for interactive use
 
 ## Architecture
 
@@ -162,18 +165,23 @@ python cli.py eval --test-set data/test_sets/sample.json
 # 4. Run specific metrics
 python cli.py eval --test-set data/test_sets/sample.json --metrics retrieval,faithfulness
 
-# 5. A/B experiment
-python cli.py experiment --test-set data/test_sets/sample.json \
-    --config-a '{"retrieval.hybrid_mode": true}' \
-    --config-b '{"retrieval.hybrid_mode": false}'
+# 5. Run with CI quality gate (exit 1 if avg score < threshold)
+python cli.py eval --test-set data/test_sets/sample.json --threshold 3.0
 
-# 6. Generate synthetic test set
+# 6. A/B experiment (compare two LLM models)
+python cli.py experiment --test-set data/test_sets/sample.json \
+    --config-a '{"llm.model": "qwen2.5:7b"}' \
+    --config-b '{"llm.model": "qwen3:8b"}' \
+    --client-type rag2
+
+# 7. Generate synthetic test set
 python cli.py generate-testset --docs-path ../rag_2/data/raw/ --num-questions 50
 
-# 7. Compare runs
-python cli.py compare --run-a data/results/run_001.json --run-b data/results/run_002.json
+# 8. Compare runs (with regression gate)
+python cli.py compare --run-a data/results/baseline.json --run-b data/results/current.json \
+    --fail-on-regression
 
-# 8. Launch dashboard
+# 9. Launch dashboard
 python cli.py dashboard
 ```
 
@@ -294,10 +302,18 @@ Rubrics are defined in `config/rubrics/*.yaml` — human-readable scoring guides
 
 ```
 rag_eval/
+├── .github/workflows/         # CI/CD pipeline (GitHub Actions)
+│   └── rag-eval-ci.yml        # Multi-stage eval + regression + A/B
+├── .windsurf/                 # Windsurf IDE integration
+│   ├── rules/                 # Skill declarations
+│   └── workflows/             # Slash-command workflows
 ├── config/
 │   ├── eval_config.yaml       # Main configuration
 │   └── rubrics/               # LLM judge rubric definitions
+├── scripts/
+│   └── ci_eval.sh             # Portable CI/CD evaluation script
 ├── src/
+│   ├── __init__.py            # SDK public API exports
 │   ├── llm_judge/             # LLM-as-a-Judge core
 │   ├── metrics/               # All metric implementations
 │   ├── pipeline/              # Evaluation orchestration
@@ -317,6 +333,98 @@ rag_eval/
 ├── requirements.txt
 └── README.md
 ```
+
+## CI/CD Integration
+
+The suite is designed for CI/CD pipeline integration with quality gates and regression detection.
+
+### Quick Setup
+
+```bash
+# Run eval with quality gate (exit code 1 if avg score < 3.0)
+python cli.py eval --test-set data/test_sets/sample.json --threshold 3.0
+
+# Compare against baseline (exit code 1 if any metric regressed)
+python cli.py compare --run-a baseline.json --run-b current.json --fail-on-regression
+```
+
+### CI Pipeline Stages
+
+| Stage | Trigger | Mode | Time | Purpose |
+|-------|---------|------|------|---------|
+| **Unit Tests** | Every PR | — | ~1m | `pytest` basic tests |
+| **Quality Gate** | Every PR | static | ~5m | Eval + score threshold check |
+| **Regression Check** | PR only | — | ~1m | Compare current vs main baseline |
+| **A/B Experiment** | Manual/nightly | pipeline | ~30m | Compare two RAG configurations |
+
+### Portable Script
+
+```bash
+# Quality gate only
+./scripts/ci_eval.sh
+
+# Quality gate + regression check
+./scripts/ci_eval.sh --with-regression
+
+# Quality gate + A/B experiment
+RAG_EVAL_CONFIG_A='{"llm.model": "qwen2.5:7b"}' \
+RAG_EVAL_CONFIG_B='{"llm.model": "qwen3:8b"}' \
+./scripts/ci_eval.sh --with-experiment
+
+# Everything
+./scripts/ci_eval.sh --all
+```
+
+Environment variables: `RAG_EVAL_THRESHOLD`, `RAG_EVAL_TEST_SET`, `RAG_EVAL_MODE`, `RAG_EVAL_BASELINE`, `RAG_EVAL_CONFIG_A/B`.
+
+### GitHub Actions
+
+A ready-to-use workflow is provided at `.github/workflows/rag-eval-ci.yml`. It requires a **self-hosted runner** with Ollama installed for the LLM judge. The A/B experiment stage supports manual trigger with custom config inputs.
+
+> **Note**: For teams without a self-hosted runner, use `static` mode with a remote LLM provider (e.g., OpenAI) by setting `judge.provider: "openai"` in `eval_config.yaml`.
+
+## Python SDK
+
+All core components are importable for programmatic use:
+
+```python
+from src import Evaluator, ExperimentRunner, RAGClientBase
+from src import TestCase, RAGResponse, EvalTestCase, EvalResult, EvalRunSummary
+from src import load_eval_config, load_rubric
+
+# Run evaluation programmatically
+evaluator = Evaluator()
+summary = evaluator.run("data/test_sets/sample.json", mode="static")
+print(summary.aggregated_scores)
+
+# A/B experiment
+runner = ExperimentRunner()
+result = runner.run(
+    test_set_path="data/test_sets/sample.json",
+    config_a={"llm.model": "qwen2.5:7b"},
+    config_b={"llm.model": "qwen3:8b"},
+)
+print(result.winner, result.statistical_tests)
+```
+
+Config loading supports environment variables for flexible deployment:
+- `RAG_EVAL_CONFIG` — path to `eval_config.yaml`
+- `RAG_EVAL_RUBRICS_DIR` — path to rubrics directory
+
+## Windsurf IDE Integration
+
+For [Windsurf](https://codeium.com/windsurf) users, slash-command workflows are available:
+
+| Command | Description |
+|---------|-------------|
+| `/rag-eval` | Run evaluation on a test set |
+| `/rag-eval-experiment` | Run A/B experiment with statistical testing |
+| `/rag-eval-compare` | Compare two evaluation runs |
+| `/rag-eval-generate-testset` | Generate synthetic test set from documents |
+| `/rag-eval-sdk` | Programmatic Python SDK usage guide |
+| `/rag-eval-dashboard` | Launch Streamlit evaluation dashboard |
+
+Type any slash command in the Cascade chat to trigger the corresponding workflow.
 
 ## Testing
 

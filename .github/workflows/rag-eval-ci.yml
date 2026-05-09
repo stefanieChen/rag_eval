@@ -1,0 +1,218 @@
+# RAG Evaluation CI/CD Pipeline
+# ==============================
+# Triggers:
+#   - Every PR: static eval + quality gate (fast, no external deps)
+#   - Merge to main: update baseline
+#   - Manual/nightly: full pipeline eval + A/B experiment
+#
+# Prerequisites:
+#   - Self-hosted runner with Ollama installed (for LLM judge & pipeline mode)
+#   - Or use GitHub-hosted runner for static mode only
+
+name: RAG Eval CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'config/**'
+      - 'data/test_sets/**'
+      - 'cli.py'
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_experiment:
+        description: 'Run A/B experiment'
+        type: boolean
+        default: false
+      config_a:
+        description: 'Config A (JSON override)'
+        type: string
+        default: '{"llm.model": "qwen2.5:7b"}'
+      config_b:
+        description: 'Config B (JSON override)'
+        type: string
+        default: '{"llm.model": "qwen3:8b"}'
+  schedule:
+    # Nightly at 2am UTC
+    - cron: '0 2 * * *'
+
+env:
+  RAG_EVAL_THRESHOLD: "3.0"
+  OLLAMA_HOST: "http://localhost:11434"
+
+jobs:
+  # ────────────────────────────────────────────────
+  # Stage 1: Unit tests (fast, every PR)
+  # ────────────────────────────────────────────────
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: python -m pytest tests/ -v --tb=short
+
+  # ────────────────────────────────────────────────
+  # Stage 2: Static eval + quality gate (every PR)
+  # ────────────────────────────────────────────────
+  eval-quality-gate:
+    runs-on: self-hosted    # needs Ollama for LLM judge
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Verify Ollama is running
+        run: curl -sf $OLLAMA_HOST/api/tags || (echo "Ollama not available" && exit 1)
+
+      - name: Run static evaluation with quality gate
+        run: |
+          python cli.py eval \
+            --test-set data/test_sets/sample.json \
+            --mode static \
+            --output-dir data/results \
+            --threshold $RAG_EVAL_THRESHOLD
+
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-${{ github.sha }}
+          path: data/results/eval_run_*.json
+          retention-days: 30
+
+  # ────────────────────────────────────────────────
+  # Stage 3: Regression check (PR only)
+  # ────────────────────────────────────────────────
+  regression-check:
+    runs-on: self-hosted
+    needs: eval-quality-gate
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download current eval results
+        uses: actions/download-artifact@v4
+        with:
+          name: eval-results-${{ github.sha }}
+          path: data/results/
+
+      - name: Download baseline from main
+        uses: actions/download-artifact@v4
+        with:
+          name: eval-baseline-main
+          path: data/results/
+        continue-on-error: true   # first run won't have baseline
+
+      - name: Run regression check
+        run: |
+          LATEST=$(ls -t data/results/eval_run_*.json | head -1)
+          BASELINE="data/results/baseline.json"
+
+          if [ -f "$BASELINE" ]; then
+            echo "Comparing $LATEST against $BASELINE"
+            python cli.py compare \
+              --run-a "$BASELINE" \
+              --run-b "$LATEST" \
+              --label-a "Baseline (main)" \
+              --label-b "Current (PR)" \
+              --fail-on-regression
+          else
+            echo "⚠ No baseline found, skipping regression check"
+          fi
+
+  # ────────────────────────────────────────────────
+  # Update baseline (merge to main only)
+  # ────────────────────────────────────────────────
+  update-baseline:
+    runs-on: self-hosted
+    needs: eval-quality-gate
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Download eval results
+        uses: actions/download-artifact@v4
+        with:
+          name: eval-results-${{ github.sha }}
+          path: data/results/
+
+      - name: Set as new baseline
+        run: |
+          LATEST=$(ls -t data/results/eval_run_*.json | head -1)
+          cp "$LATEST" data/results/baseline.json
+          echo "✓ Updated baseline: $LATEST → baseline.json"
+
+      - name: Upload baseline artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-baseline-main
+          path: data/results/baseline.json
+          retention-days: 90
+
+  # ────────────────────────────────────────────────
+  # Stage 4: A/B experiment (manual or nightly)
+  # ────────────────────────────────────────────────
+  ab-experiment:
+    runs-on: self-hosted    # needs Ollama + ChromaDB for pipeline mode
+    if: >
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_experiment == 'true')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Verify Ollama is running
+        run: curl -sf $OLLAMA_HOST/api/tags || (echo "Ollama not available" && exit 1)
+
+      - name: Run A/B experiment
+        env:
+          CONFIG_A: ${{ github.event.inputs.config_a || '{"llm.model": "qwen2.5:7b"}' }}
+          CONFIG_B: ${{ github.event.inputs.config_b || '{"llm.model": "qwen3:8b"}' }}
+        run: |
+          python cli.py experiment \
+            --test-set data/test_sets/sample.json \
+            --config-a "$CONFIG_A" \
+            --config-b "$CONFIG_B" \
+            --label-a "Variant A" \
+            --label-b "Variant B" \
+            --output-dir data/results \
+            --client-type rag2
+
+      - name: Upload experiment results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: experiment-results-${{ github.run_id }}
+          path: data/results/experiment_*.json
+          retention-days: 90

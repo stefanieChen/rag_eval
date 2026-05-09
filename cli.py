@@ -36,8 +36,10 @@ def cli():
 @click.option("--client-type", default=None,
               help="RAG client type: 'rag2', 'http', or a fully-qualified class path. "
                    "Overrides config. Only used in pipeline mode.")
+@click.option("--threshold", default=None, type=float,
+              help="CI gate: minimum average score. Exit code 1 if below. (e.g., 0.6 or 3.0)")
 def eval(test_set: str, mode: str, metrics: str, output_dir: str, output_format: str,
-         client_type: str):
+         client_type: str, threshold: float):
     """Run evaluation on a test set."""
     from src.pipeline.evaluator import Evaluator
     from src.reporting.reporter import save_html_report, save_json_report
@@ -84,6 +86,21 @@ def eval(test_set: str, mode: str, metrics: str, output_dir: str, output_format:
 
     # Print summary table
     _print_summary(summary.aggregated_scores, summary.num_cases, summary.total_latency_ms)
+
+    # CI/CD quality gate
+    if threshold is not None:
+        avg_score = sum(summary.aggregated_scores.values()) / max(len(summary.aggregated_scores), 1)
+        if avg_score < threshold:
+            console.print(
+                f"\n  [red bold]QUALITY GATE FAILED:[/red bold] "
+                f"avg score {avg_score:.4f} < threshold {threshold}"
+            )
+            sys.exit(1)
+        else:
+            console.print(
+                f"\n  [green bold]QUALITY GATE PASSED:[/green bold] "
+                f"avg score {avg_score:.4f} >= threshold {threshold}"
+            )
 
 
 @cli.command()
@@ -181,7 +198,9 @@ def generate_testset(docs_path: str, num_questions: int, output: str):
 @click.option("--run-b", required=True, help="Path to second result JSON")
 @click.option("--label-a", default="Baseline", help="Label for first run")
 @click.option("--label-b", default="Current", help="Label for second run")
-def compare(run_a: str, run_b: str, label_a: str, label_b: str):
+@click.option("--fail-on-regression", is_flag=True, default=False,
+              help="CI gate: exit code 1 if any metric regressed.")
+def compare(run_a: str, run_b: str, label_a: str, label_b: str, fail_on_regression: bool):
     """Compare two evaluation runs."""
     from src.reporting.comparator import compare_files, format_comparison_table
 
@@ -194,6 +213,14 @@ def compare(run_a: str, run_b: str, label_a: str, label_b: str):
     console.print(f"\n[green]Improved:[/green] {result['num_improved']} | "
                   f"[red]Regressed:[/red] {result['num_regressed']} | "
                   f"Stable: {result['num_stable']}")
+
+    # CI/CD regression gate
+    if fail_on_regression and result.get("num_regressed", 0) > 0:
+        console.print(
+            f"\n  [red bold]REGRESSION GATE FAILED:[/red bold] "
+            f"{result['num_regressed']} metric(s) regressed"
+        )
+        sys.exit(1)
 
 
 @cli.command()

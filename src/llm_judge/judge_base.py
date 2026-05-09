@@ -60,29 +60,51 @@ def _get_project_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
-def load_eval_config() -> Dict[str, Any]:
+def load_eval_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load the main evaluation config from config/eval_config.yaml.
+
+    Resolution order for config path:
+    1. Explicit ``config_path`` argument.
+    2. ``RAG_EVAL_CONFIG`` environment variable.
+    3. Default: ``<project_root>/config/eval_config.yaml``.
+
+    Args:
+        config_path: Optional explicit path to eval_config.yaml.
 
     Returns:
         Parsed config dict.
     """
-    config_path = _get_project_root() / "config" / "eval_config.yaml"
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config not found: {config_path}")
-    with open(config_path, "r", encoding="utf-8") as f:
+    if config_path is None:
+        config_path = os.environ.get("RAG_EVAL_CONFIG", None)
+    if config_path is None:
+        config_path = str(_get_project_root() / "config" / "eval_config.yaml")
+    resolved = Path(config_path)
+    if not resolved.exists():
+        raise FileNotFoundError(f"Config not found: {resolved}")
+    with open(resolved, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
 
-def load_rubric(rubric_name: str) -> Dict[str, Any]:
+def load_rubric(rubric_name: str, rubrics_dir: Optional[str] = None) -> Dict[str, Any]:
     """Load a rubric YAML file from config/rubrics/.
+
+    Resolution order for rubrics directory:
+    1. Explicit ``rubrics_dir`` argument.
+    2. ``RAG_EVAL_RUBRICS_DIR`` environment variable.
+    3. Default: ``<project_root>/config/rubrics/``.
 
     Args:
         rubric_name: Name of the rubric (without .yaml extension).
+        rubrics_dir: Optional explicit path to rubrics directory.
 
     Returns:
         Parsed rubric dict.
     """
-    rubric_path = _get_project_root() / "config" / "rubrics" / f"{rubric_name}.yaml"
+    if rubrics_dir is None:
+        rubrics_dir = os.environ.get("RAG_EVAL_RUBRICS_DIR", None)
+    if rubrics_dir is None:
+        rubrics_dir = str(_get_project_root() / "config" / "rubrics")
+    rubric_path = Path(rubrics_dir) / f"{rubric_name}.yaml"
     if not rubric_path.exists():
         raise FileNotFoundError(f"Rubric not found: {rubric_path}")
     with open(rubric_path, "r", encoding="utf-8") as f:
